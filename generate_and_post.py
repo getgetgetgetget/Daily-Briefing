@@ -9,11 +9,10 @@ import os
 import json
 import datetime
 import textwrap
-import requests
+import anthropic
 import tweepy
 
 # ── 환경변수 ──────────────────────────────────────────────
-ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 X_API_KEY = os.environ["X_API_KEY"]
 X_API_SECRET = os.environ["X_API_SECRET"]
 X_ACCESS_TOKEN = os.environ["X_ACCESS_TOKEN"]
@@ -76,17 +75,19 @@ def generate_briefing() -> str:
         8. 전체 길이는 트위터 스레드용이므로 각 섹션이 280자(한글 기준) 이내가 되도록 적절히 분할 가능하게 작성.
     """)
 
-    payload = {
-        "model": "claude-sonnet-4-20250514",
-        "max_tokens": 4096,
-        "system": system_prompt,
-        "tools": [
+    client = anthropic.Anthropic()  # ANTHROPIC_API_KEY 환경변수 자동 사용
+
+    response = client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=4096,
+        system=system_prompt,
+        tools=[
             {
                 "type": "web_search_20250305",
                 "name": "web_search",
             }
         ],
-        "messages": [
+        messages=[
             {
                 "role": "user",
                 "content": (
@@ -98,29 +99,14 @@ def generate_briefing() -> str:
                 ),
             }
         ],
-    }
-
-    headers = {
-        "x-api-key": ANTHROPIC_API_KEY,
-        "anthropic-version": "2025-01-01",
-        "content-type": "application/json",
-    }
-
-    resp = requests.post(
-        "https://api.anthropic.com/v1/messages",
-        headers=headers,
-        json=payload,
-        timeout=120,
     )
-    resp.raise_for_status()
-    data = resp.json()
 
     # content 블록에서 텍스트만 추출
-    text_parts = [
-        block["text"]
-        for block in data.get("content", [])
-        if block.get("type") == "text" and block.get("text")
-    ]
+    text_parts = []
+    for block in response.content:
+        if block.type == "text" and block.text:
+            text_parts.append(block.text)
+
     briefing = "\n".join(text_parts).strip()
 
     if not briefing:
