@@ -2,11 +2,10 @@
 Tivismac — 주주행동주의 데일리 브리핑 자동화
 GitHub Actions에서 매일 21:00 KST (12:00 UTC)에 실행됨.
 1) Claude API (web search tool)로 당일 뉴스 수집 + 브리핑 생성
-2) tweepy v2로 X에 스레드 포스팅
+2) tweepy v2로 X에 단일 포스트로 게시 (X Premium 긴 글 지원)
 """
 
 import os
-import json
 import datetime
 import textwrap
 import anthropic
@@ -72,7 +71,7 @@ def generate_briefing() -> str:
         5. 해시태그는 마지막에 관련 종목코드/키워드를 포함하라.
         6. 종목코드는 #010130 같은 형태로.
         7. 말투는 간결하고 팩트 중심. 반말 X, 존칭 X, ~임, ~함, ~됨 체.
-        8. 전체 길이는 트위터 스레드용이므로 각 섹션이 280자(한글 기준) 이내가 되도록 적절히 분할 가능하게 작성.
+        8. 하나의 긴 포스트로 올라가므로 분할을 고려하지 않아도 됨. 충분히 상세하게 작성.
     """)
 
     client = anthropic.Anthropic()  # ANTHROPIC_API_KEY 환경변수 자동 사용
@@ -115,53 +114,9 @@ def generate_briefing() -> str:
     return briefing
 
 
-# ── 2. 트위터 스레드 분할 ─────────────────────────────────
-def split_into_thread(text: str, max_len: int = 270) -> list[str]:
-    """
-    브리핑을 트위터 스레드용 청크로 분할한다.
-    섹션 구분선(━━━) 기준으로 먼저 나누고,
-    각 섹션이 max_len 초과 시 줄 단위로 추가 분할.
-    """
-    sections = text.split("━━━━━━━━━━━━━━━━━━━━")
-    tweets: list[str] = []
-
-    for section in sections:
-        section = section.strip()
-        if not section:
-            continue
-
-        if len(section) <= max_len:
-            tweets.append(section)
-        else:
-            # 줄 단위로 분할
-            chunk = ""
-            for line in section.split("\n"):
-                test = (chunk + "\n" + line).strip() if chunk else line
-                if len(test) <= max_len:
-                    chunk = test
-                else:
-                    if chunk:
-                        tweets.append(chunk)
-                    # 단일 라인이 max_len 초과하면 강제 분할
-                    if len(line) > max_len:
-                        for i in range(0, len(line), max_len):
-                            tweets.append(line[i : i + max_len])
-                        chunk = ""
-                    else:
-                        chunk = line
-            if chunk:
-                tweets.append(chunk)
-
-    # 스레드 번호 추가 (2개 이상일 때)
-    if len(tweets) > 1:
-        tweets = [f"{t}\n\n🧵 {i+1}/{len(tweets)}" for i, t in enumerate(tweets)]
-
-    return tweets
-
-
-# ── 3. X 포스팅 ───────────────────────────────────────────
-def post_thread(tweets: list[str]) -> None:
-    """tweepy v2 Client로 스레드를 포스팅한다."""
+# ── 2. X 포스팅 (단일 포스트) ─────────────────────────────
+def post_to_x(text: str) -> None:
+    """tweepy v2 Client로 단일 포스트를 게시한다."""
     client = tweepy.Client(
         consumer_key=X_API_KEY,
         consumer_secret=X_API_SECRET,
@@ -169,14 +124,9 @@ def post_thread(tweets: list[str]) -> None:
         access_token_secret=X_ACCESS_SECRET,
     )
 
-    previous_id = None
-    for i, tweet_text in enumerate(tweets):
-        resp = client.create_tweet(
-            text=tweet_text,
-            in_reply_to_tweet_id=previous_id,
-        )
-        previous_id = resp.data["id"]
-        print(f"  ✅ 트윗 {i+1}/{len(tweets)} 게시 완료 (ID: {previous_id})")
+    resp = client.create_tweet(text=text)
+    tweet_id = resp.data["id"]
+    print(f"  ✅ 게시 완료 (ID: {tweet_id})")
 
 
 # ── main ──────────────────────────────────────────────────
@@ -191,12 +141,8 @@ def main():
     print(briefing)
     print("─" * 40)
 
-    tweets = split_into_thread(briefing)
-    print(f"📝 {len(tweets)}개 트윗으로 분할됨")
-    print("─" * 40)
-
     print("🐦 X에 포스팅 중...")
-    post_thread(tweets)
+    post_to_x(briefing)
     print("─" * 40)
     print("🎉 완료!")
 
